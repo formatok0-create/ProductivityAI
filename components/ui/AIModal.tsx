@@ -21,20 +21,13 @@ import Animated, {
   withSpring,
   cancelAnimation,
 } from 'react-native-reanimated';
+import { Audio } from 'expo-av';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontSize, FontWeight, Radii, Shadow, Spacing } from '../../constants/theme';
 import { PressableScale } from './PressableScale';
-import { parseWithClaude } from '../../services/claude';
+import { parseWithClaude, transcribeAudio } from '../../services/claude';
 import { useAI } from '../../contexts/AIContext';
 import { AIParseResult } from '../../types';
-
-// ─── Web Speech API types ────────────────────────────────────────────────────
-declare global {
-  interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
-  }
-}
 
 // ─── Waveform bars ───────────────────────────────────────────────────────────
 function WaveBar({ delay, color }: { delay: number; color: string }) {
@@ -58,12 +51,7 @@ function WaveBar({ delay, color }: { delay: number; color: string }) {
 }
 
 const wave = StyleSheet.create({
-  bar: {
-    width: 5,
-    borderRadius: 3,
-    marginHorizontal: 2,
-    alignSelf: 'center',
-  },
+  bar: { width: 5, borderRadius: 3, marginHorizontal: 2, alignSelf: 'center' },
 });
 
 // ─── Pulse ring ──────────────────────────────────────────────────────────────
@@ -74,13 +62,11 @@ function PulseRing({ active }: { active: boolean }) {
     if (active) {
       scale.value = withRepeat(
         withSequence(withTiming(1.7, { duration: 750 }), withTiming(1, { duration: 750 })),
-        -1,
-        false
+        -1, false
       );
       opacity.value = withRepeat(
         withSequence(withTiming(0.35, { duration: 375 }), withTiming(0, { duration: 375 })),
-        -1,
-        false
+        -1, false
       );
     } else {
       cancelAnimation(scale);
@@ -99,82 +85,119 @@ function PulseRing({ active }: { active: boolean }) {
 const pr = StyleSheet.create({
   ring: {
     position: 'absolute',
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 72, height: 72, borderRadius: 36,
     backgroundColor: Colors.danger,
   },
 });
 
-// ─── Speech hook (Web Speech API only — no native module needed) ─────────────
-function useSpeechRecognition() {
-  const recognitionRef = useRef<any>(null);
+// ─── Native audio recorder hook ──────────────────────────────────────────────
+function useAudioRecorder() {
+  const recordingRef = useRef<Audio.Recording | null>(null);
   const [isListening, setIsListening] = useState(false);
-  const [partialText, setPartialText] = useState('');
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isSupported = Platform.OS === 'web' && (
-    typeof window !== 'undefined' &&
-    (window.SpeechRecognition || window.webkitSpeechRecognition)
-  );
+  const start = useCallback(async () => {
+    try {
+      setError(null);
+      // Request permission
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        setError('Permission microphone refusée — activez-la dans les paramètres');
+        return;
+      }
 
-  const start = useCallback((onResult: (text: string) => void) => {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recordingRef.current = recording;
+      setIsListening(true);
+    } catch (e) {
+      setError('Impossible de démarrer le microphone');
+      setIsListening(false);
+    }
+  }, []);
+
+  const stop = useCallback(async (): Promise<string | null> => {
+    if (!recordingRef.current) return null;
+    try {
+      setIsListening(false);
+      setIsTranscribing(true);
+      await recordingRef.current.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
+
+      if (!uri) {
+        setIsTranscribing(false);
+        return null;
+      }
+
+      // Transcribe via OnSpace AI
+      const text = await transcribeAudio(uri);
+      setIsTranscribing(false);
+      return text;
+    } catch {
+      setIsTranscribing(false);
+      setError('Erreur lors de la transcription');
+      return null;
+    }
+  }, []);
+
+  const cancel = useCallback(async () => {
+    if (recordingRef.current) {
+      try {
+        await recordingRef.current.stopAndUnloadAsync();
+      } catch { /* ignore */ }
+      recordingRef.current = null;
+    }
+    setIsListening(false);
+    setIsTranscribing(false);
+  }, []);
+
+  return { isListening, isTranscribing, error, start, stop, cancel };
+}
+
+// ─── Web Speech hook (browser only) ─────────────────────────────────────────
+declare global {
+  interface Window { SpeechRecognition: any; webkitSpeechRecognition: any; }
+}
+
+function useWebSpeech() {
+  const recRef = useRef<any>(null);
+  const [isListening, setIsListening] = useState(false);
+  const isSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
+    !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const start = useCallback((onResult: (t: string) => void) => {
     if (!isSupported) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const rec = new SR();
     rec.lang = 'fr-FR';
-    rec.interimResults = true;
+    rec.interimResults = false;
     rec.continuous = false;
-    recognitionRef.current = rec;
-
-    rec.onstart = () => {
-      setIsListening(true);
-      setError(null);
-      setPartialText('');
-    };
-
+    recRef.current = rec;
+    rec.onstart = () => setIsListening(true);
     rec.onresult = (e: any) => {
-      let interim = '';
-      let final = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) {
-          final += t;
-        } else {
-          interim += t;
-        }
-      }
-      setPartialText(interim || final);
-      if (final) {
-        onResult(final);
-        setIsListening(false);
-      }
+      const text = e.results[0]?.[0]?.transcript ?? '';
+      if (text) onResult(text);
     };
-
-    rec.onerror = (e: any) => {
-      if (e.error !== 'no-speech') {
-        setError('Micro inaccessible — vérifiez les permissions du navigateur');
-      }
-      setIsListening(false);
-    };
-
-    rec.onend = () => {
-      setIsListening(false);
-    };
-
-    try {
-      rec.start();
-    } catch {
-      setError('Impossible de démarrer la reconnaissance vocale');
-    }
+    rec.onend = () => setIsListening(false);
+    rec.onerror = () => setIsListening(false);
+    try { rec.start(); } catch { setIsListening(false); }
   }, [isSupported]);
 
   const stop = useCallback(() => {
-    recognitionRef.current?.stop();
+    recRef.current?.stop();
     setIsListening(false);
   }, []);
 
-  return { isSupported, isListening, partialText, error, start, stop, setPartialText };
+  return { isSupported, isListening, start, stop };
 }
 
 // ─── Main modal ──────────────────────────────────────────────────────────────
@@ -188,53 +211,65 @@ export function AIModal({ visible, onClose, onResult }: Props) {
   useAI();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const { isSupported, isListening, partialText, error, start, stop, setPartialText } = useSpeechRecognition();
 
-  // Stop on close
+  // Platform-specific hooks
+  const native = useAudioRecorder();
+  const web = useWebSpeech();
+
+  const isListening = Platform.OS === 'web' ? web.isListening : native.isListening;
+  const isTranscribing = Platform.OS !== 'web' && native.isTranscribing;
+  const micError = Platform.OS !== 'web' ? native.error : null;
+
   useEffect(() => {
-    if (!visible && isListening) stop();
+    if (!visible) {
+      if (Platform.OS === 'web') web.stop();
+      else native.cancel();
+    }
   }, [visible]);
 
-  const toggleMic = useCallback(() => {
-    if (!isSupported) {
-      Alert.alert(
-        'Reconnaissance vocale',
-        'La saisie vocale est disponible uniquement via le navigateur web. Sur mobile, utilisez la saisie texte ou le clavier vocal du système.',
-        [{ text: 'OK' }]
-      );
+  const toggleMic = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      if (web.isListening) {
+        web.stop();
+      } else {
+        web.start((text) => setInput(text));
+      }
       return;
     }
-    if (isListening) {
-      stop();
-    } else {
-      start((text) => {
-        setInput(text);
-        setPartialText('');
-      });
-    }
-  }, [isSupported, isListening, start, stop, setPartialText]);
 
-  // ─── Send ─────────────────────────────────────────────────────────────────
+    // Native
+    if (native.isListening) {
+      const transcribed = await native.stop();
+      if (transcribed) setInput(transcribed);
+    } else {
+      await native.start();
+    }
+  }, [native, web]);
+
   const handleSend = useCallback(async () => {
-    const text = (input || partialText).trim();
+    const text = input.trim();
     if (!text) return;
-    if (isListening) stop();
+    if (native.isListening) await native.cancel();
     setLoading(true);
     try {
       const result = await parseWithClaude(text);
       onResult(result);
       setInput('');
-      setPartialText('');
       onClose();
     } catch {
-      Alert.alert('Erreur IA', 'Impossible de traiter la demande. Veuillez réessayer.');
+      Alert.alert('Erreur IA', 'Impossible de traiter la demande. Vérifiez votre connexion.');
     } finally {
       setLoading(false);
     }
-  }, [input, partialText, isListening, stop, onResult, onClose]);
+  }, [input, native, onResult, onClose]);
 
-  const displayText = isListening ? partialText : input;
-  const canSend = (input.trim() || partialText.trim()) && !loading;
+  const canSend = input.trim().length > 0 && !loading && !isListening && !isTranscribing;
+
+  const micLabel = isTranscribing
+    ? 'Transcription en cours...'
+    : isListening
+    ? 'En écoute... Tapez sur le micro pour arrêter'
+    : 'Appuyez sur le micro et parlez';
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -267,13 +302,22 @@ export function AIModal({ visible, onClose, onResult }: Props) {
               <PressableScale
                 onPress={toggleMic}
                 scaleTo={0.88}
-                style={[styles.micBtn, isListening && styles.micBtnActive]}
+                style={[
+                  styles.micBtn,
+                  isListening && styles.micBtnActive,
+                  isTranscribing && styles.micBtnTranscribing,
+                ]}
+                disabled={isTranscribing}
               >
-                <MaterialIcons
-                  name={isListening ? 'mic' : 'mic-none'}
-                  size={34}
-                  color="#fff"
-                />
+                {isTranscribing ? (
+                  <ActivityIndicator color="#fff" size="large" />
+                ) : (
+                  <MaterialIcons
+                    name={isListening ? 'mic' : 'mic-none'}
+                    size={34}
+                    color="#fff"
+                  />
+                )}
               </PressableScale>
             </View>
 
@@ -284,17 +328,13 @@ export function AIModal({ visible, onClose, onResult }: Props) {
                 ))}
               </View>
             ) : (
-              <Text style={styles.micHint}>
-                {isSupported
-                  ? 'Appuyez sur le micro pour dicter'
-                  : 'Saisie vocale disponible sur navigateur web'}
-              </Text>
+              <Text style={styles.micHint}>{micLabel}</Text>
             )}
 
-            {error ? (
+            {micError ? (
               <View style={styles.errorRow}>
                 <MaterialIcons name="error-outline" size={15} color={Colors.danger} />
-                <Text style={styles.errorText}>{error}</Text>
+                <Text style={styles.errorText}>{micError}</Text>
               </View>
             ) : null}
           </View>
@@ -317,17 +357,17 @@ export function AIModal({ visible, onClose, onResult }: Props) {
             </ScrollView>
           </View>
 
-          {/* Text input */}
+          {/* Text input + send */}
           <View style={styles.inputRow}>
             <TextInput
-              style={[styles.textInput, isListening && styles.textInputListening]}
+              style={styles.textInput}
               placeholder={isListening ? 'Transcription en cours...' : 'Ou tapez votre demande...'}
-              placeholderTextColor={isListening ? Colors.danger + '80' : Colors.textTertiary}
-              value={displayText}
+              placeholderTextColor={Colors.textTertiary}
+              value={input}
               onChangeText={v => { if (!isListening) setInput(v); }}
               multiline
               maxLength={300}
-              editable={!isListening}
+              editable={!isListening && !isTranscribing}
             />
             <PressableScale
               onPress={handleSend}
@@ -352,14 +392,8 @@ export function AIModal({ visible, onClose, onResult }: Props) {
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
+  overlay: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: 28,
@@ -369,159 +403,79 @@ const styles = StyleSheet.create({
     ...Shadow.strong,
   },
   handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
+    width: 40, height: 4, borderRadius: 2,
     backgroundColor: Colors.border,
-    alignSelf: 'center',
-    marginBottom: Spacing.lg,
+    alignSelf: 'center', marginBottom: Spacing.lg,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.lg,
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginBottom: Spacing.lg,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   aiAvatarBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 44, height: 44, borderRadius: 22,
     backgroundColor: Colors.teal,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
   },
-  headerTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: FontWeight.bold,
-    color: Colors.text,
-  },
-  headerSubtitle: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-  },
+  headerTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.text },
+  headerSubtitle: { fontSize: FontSize.sm, color: Colors.textSecondary },
   micSection: {
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-    gap: Spacing.md,
-    minHeight: 110,
+    alignItems: 'center', marginBottom: Spacing.lg,
+    gap: Spacing.md, minHeight: 110,
   },
   micRingWrapper: {
-    width: 72,
-    height: 72,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 72, height: 72,
+    alignItems: 'center', justifyContent: 'center',
   },
   micBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 72, height: 72, borderRadius: 36,
     backgroundColor: Colors.textSecondary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: 'rgba(255,255,255,0.25)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 8,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 3, borderColor: 'rgba(255,255,255,0.25)',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18, shadowRadius: 10, elevation: 8,
   },
-  micBtnActive: {
-    backgroundColor: Colors.danger,
-  },
+  micBtnActive: { backgroundColor: Colors.danger },
+  micBtnTranscribing: { backgroundColor: Colors.teal },
   waveform: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 48,
-    marginTop: 4,
+    flexDirection: 'row', alignItems: 'center',
+    height: 48, marginTop: 4,
   },
   micHint: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    marginTop: 4,
+    fontSize: FontSize.sm, color: Colors.textSecondary,
+    textAlign: 'center', marginTop: 4, paddingHorizontal: Spacing.xl,
   },
-  errorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  errorText: {
-    fontSize: FontSize.xs,
-    color: Colors.danger,
-  },
-  examples: {
-    marginBottom: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  examplesTitle: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    fontWeight: FontWeight.medium,
-  },
-  examplesScroll: {
-    gap: Spacing.sm,
-    paddingRight: Spacing.md,
-  },
+  errorRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  errorText: { fontSize: FontSize.xs, color: Colors.danger },
+  examples: { marginBottom: Spacing.lg, gap: Spacing.sm },
+  examplesTitle: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.medium },
+  examplesScroll: { gap: Spacing.sm, paddingRight: Spacing.md },
   exampleChip: {
     backgroundColor: Colors.primaryLight,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
     borderRadius: Radii.round,
-    borderWidth: 1,
-    borderColor: Colors.primary + '40',
+    borderWidth: 1, borderColor: Colors.primary + '40',
   },
-  exampleText: {
-    fontSize: FontSize.sm,
-    color: Colors.primaryDark,
-    fontWeight: FontWeight.medium,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    alignItems: 'flex-end',
-  },
+  exampleText: { fontSize: FontSize.sm, color: Colors.primaryDark, fontWeight: FontWeight.medium },
+  inputRow: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-end' },
   textInput: {
     flex: 1,
     backgroundColor: Colors.background,
     borderRadius: Radii.xl,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    fontSize: FontSize.md,
-    color: Colors.text,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    maxHeight: 120,
-    lineHeight: 22,
-  },
-  textInputListening: {
-    borderColor: Colors.danger + '60',
-    backgroundColor: Colors.danger + '08',
-    color: Colors.danger,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+    fontSize: FontSize.md, color: Colors.text,
+    borderWidth: 1.5, borderColor: Colors.border,
+    maxHeight: 120, lineHeight: 22,
   },
   sendBtn: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 50, height: 50, borderRadius: 25,
     backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
     ...Shadow.green,
   },
-  sendBtnDisabled: {
-    backgroundColor: Colors.border,
-    shadowOpacity: 0,
-    elevation: 0,
-  },
+  sendBtnDisabled: { backgroundColor: Colors.border, shadowOpacity: 0, elevation: 0 },
   hint: {
-    fontSize: FontSize.xs,
-    color: Colors.textTertiary,
-    textAlign: 'center',
-    marginTop: Spacing.md,
+    fontSize: FontSize.xs, color: Colors.textTertiary,
+    textAlign: 'center', marginTop: Spacing.md,
   },
 });

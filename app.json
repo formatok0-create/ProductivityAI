@@ -11,13 +11,7 @@
     "ios": {
       "supportsTablet": true
     },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#0d2400"
-      },
-      "edgeToEdgeEnabled": true
-    },
+
     "web": {
       "bundler": "metro",
       "output": "static",
@@ -34,8 +28,25 @@
           "backgroundColor": "#0d2400"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Cette application utilise le microphone pour la saisie vocale des tâches et routines."
+        }
+      ]
     ],
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#0d2400"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET"
+      ]
+    },
     "experiments": {
       "typedRoutes": true
     }

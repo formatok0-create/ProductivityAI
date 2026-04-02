@@ -1,4 +1,5 @@
 import { AIParseResult } from '../types';
+import * as FileSystem from 'expo-file-system';
 
 // OnSpace AI — no API key needed, managed by the platform
 const ONSPACE_AI_BASE_URL: string =
@@ -62,6 +63,62 @@ export async function parseWithClaude(userInput: string): Promise<AIParseResult>
     const match = text.match(/\{[\s\S]*\}/);
     if (match) return JSON.parse(match[0]) as AIParseResult;
     throw new Error('Could not parse AI response');
+  }
+}
+
+/**
+ * Transcribes audio file to text using OnSpace AI (Gemini multimodal).
+ * Falls back to mock if env vars are not set.
+ */
+export async function transcribeAudio(audioUri: string): Promise<string> {
+  if (!ONSPACE_AI_BASE_URL || !ONSPACE_AI_API_KEY) {
+    return 'Rappel réunion demain matin';
+  }
+
+  try {
+    // Read audio file as base64
+    const base64 = await FileSystem.readAsStringAsync(audioUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    // Determine MIME type (expo-av records as m4a on iOS, 3gp/aac on Android)
+    const mimeType = audioUri.endsWith('.m4a') ? 'audio/mp4' : 'audio/3gpp';
+
+    const response = await fetch(`${ONSPACE_AI_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ONSPACE_AI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-3-flash-preview',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Transcris exactement ce que la personne dit dans cet audio en français. Retourne uniquement la transcription, sans ponctuation supplémentaire.',
+              },
+              {
+                type: 'input_audio',
+                input_audio: {
+                  data: base64,
+                  format: mimeType,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) throw new Error('Transcription failed');
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content ?? '';
+  } catch (e) {
+    console.warn('[transcribeAudio] Error:', e);
+    throw e;
   }
 }
 
