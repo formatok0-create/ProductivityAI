@@ -14,6 +14,7 @@ import { useApp } from '../../contexts/AppContext';
 import { useAI } from '../../contexts/AIContext';
 import { TaskCard } from '../../components/feature/TaskCard';
 import { MicFAB } from '../../components/feature/MicFAB';
+import { RadialFAB, RadialAction } from '../../components/ui/RadialFAB';
 import { AIModal } from '../../components/ui/AIModal';
 import { AddModal } from '../../components/ui/AddModal';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -265,9 +266,50 @@ export default function DashboardScreen() {
         <View style={{ height: 120 }} />
       </ScrollView>
 
-      {/* ─── Floating Mic ─────────────────────────────────────────────────── */}
-      <View style={[styles.fab, { bottom: insets.bottom + 80 }]}>
-        <MicFAB isListening={isListening} onPress={handleMicPress} />
+      {/* ─── Radial FAB ───────────────────────────────────────────────────── */}
+      <View
+        style={[styles.fab, { bottom: insets.bottom + 76 }]}
+        pointerEvents="box-none"
+      >
+        <RadialFAB
+          actions={[
+            {
+              icon: 'check-circle-outline',
+              label: 'Tâche',
+              color: Colors.primary,
+              bgColor: Colors.primaryLight,
+              onPress: () => setAddModalType('task'),
+            },
+            {
+              icon: 'auto-awesome',
+              label: 'IA',
+              color: Colors.teal,
+              bgColor: Colors.tealLight,
+              onPress: () => setAiModalVisible(true),
+            },
+            {
+              icon: 'mic-none',
+              label: 'Voix',
+              color: Colors.purple,
+              bgColor: Colors.purpleLight,
+              onPress: handleMicPress,
+            },
+            {
+              icon: 'loop',
+              label: 'Routine',
+              color: Colors.orange,
+              bgColor: Colors.orangeLight,
+              onPress: () => setAddModalType('routine'),
+            },
+            {
+              icon: 'folder-open',
+              label: 'Projet',
+              color: Colors.pink,
+              bgColor: Colors.pinkLight,
+              onPress: () => setAddModalType('project'),
+            },
+          ]}
+        />
       </View>
 
       {/* ─── Modals ───────────────────────────────────────────────────────── */}
@@ -520,6 +562,10 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: 'absolute',
-    right: Spacing.xl,
+    alignSelf: 'center',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 100,
   },
 });
