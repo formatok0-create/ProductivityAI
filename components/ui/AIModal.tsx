@@ -16,8 +16,8 @@ import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontSize, FontWeight, Radii, Shadow, Spacing } from '../../constants/theme';
 import { PressableScale } from './PressableScale';
-import { parseWithClaude, mockParseResult } from '../../services/claude';
-import { useAI } from '../../contexts/AIContext';
+import { parseWithClaude } from '../../services/claude';
+import { CLAUDE_API_KEY, useAI } from '../../contexts/AIContext';
 import { AIParseResult } from '../../types';
 
 interface Props {
@@ -27,37 +27,28 @@ interface Props {
 }
 
 export function AIModal({ visible, onClose, onResult }: Props) {
-  const { apiKey, setApiKey } = useAI();
+  useAI(); // keep context subscription
   const [input, setInput] = useState('');
-  const [keyInput, setKeyInput] = useState(apiKey);
   const [loading, setLoading] = useState(false);
-  const [showKeyField, setShowKeyField] = useState(false);
+  const [showEnvInfo, setShowEnvInfo] = useState(false);
+  const hasKey = Boolean(CLAUDE_API_KEY);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text) return;
     setLoading(true);
     try {
-      let result: AIParseResult;
-      if (apiKey) {
-        result = await parseWithClaude(text, apiKey);
-      } else {
-        result = mockParseResult(text);
-      }
+      // parseWithClaude reads key from env internally; falls back to mock if absent
+      const result = await parseWithClaude(text);
       onResult(result);
       setInput('');
       onClose();
-    } catch (err) {
-      Alert.alert('Erreur IA', 'Impossible de traiter la demande. Vérifiez votre clé API.');
+    } catch {
+      Alert.alert('Erreur IA', 'Impossible de traiter la demande. Vérifiez EXPO_PUBLIC_ANTHROPIC_API_KEY dans .env');
     } finally {
       setLoading(false);
     }
-  }, [input, apiKey, onResult, onClose]);
-
-  const saveKey = useCallback(() => {
-    setApiKey(keyInput.trim());
-    setShowKeyField(false);
-  }, [keyInput, setApiKey]);
+  }, [input, onResult, onClose]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -81,37 +72,30 @@ export function AIModal({ visible, onClose, onResult }: Props) {
               <View>
                 <Text style={styles.headerTitle}>Assistant IA</Text>
                 <Text style={styles.headerSubtitle}>
-                  {apiKey ? 'Claude API' : 'Mode démo'}
+                  {hasKey ? 'Claude API' : 'Mode démo'}
                 </Text>
               </View>
             </View>
-            <PressableScale onPress={() => setShowKeyField(v => !v)} scaleTo={0.9}>
+            <PressableScale onPress={() => setShowEnvInfo(v => !v)} scaleTo={0.9}>
               <View style={styles.keyBtn}>
-                <MaterialIcons name="vpn-key" size={18} color={apiKey ? Colors.primary : Colors.textTertiary} />
+                <MaterialIcons name="vpn-key" size={18} color={hasKey ? Colors.primary : Colors.textTertiary} />
               </View>
             </PressableScale>
           </View>
 
-          {/* API Key field */}
-          {showKeyField ? (
+          {/* Env info panel */}
+          {showEnvInfo ? (
             <View style={styles.keySection}>
-              <Text style={styles.keyLabel}>Clé API Anthropic</Text>
-              <View style={styles.keyRow}>
-                <TextInput
-                  style={styles.keyInput}
-                  placeholder="sk-ant-..."
-                  placeholderTextColor={Colors.textTertiary}
-                  value={keyInput}
-                  onChangeText={setKeyInput}
-                  secureTextEntry
-                  autoCapitalize="none"
-                />
-                <PressableScale onPress={saveKey} scaleTo={0.9}>
-                  <View style={styles.saveKeyBtn}>
-                    <MaterialIcons name="check" size={20} color="#fff" />
-                  </View>
-                </PressableScale>
-              </View>
+              <Text style={styles.keyLabel}>
+                {hasKey
+                  ? '✅ Clé API détectée via EXPO_PUBLIC_ANTHROPIC_API_KEY'
+                  : '⚠️ Aucune clé API détectée'}
+              </Text>
+              {!hasKey ? (
+                <Text style={styles.envHint}>
+                  {'Créez un fichier .env à la racine :\nEXPO_PUBLIC_ANTHROPIC_API_KEY=sk-ant-...'}
+                </Text>
+              ) : null}
             </View>
           ) : null}
 
@@ -160,7 +144,7 @@ export function AIModal({ visible, onClose, onResult }: Props) {
           </View>
 
           <Text style={styles.hint}>
-            {apiKey ? 'Propulsé par Claude (Anthropic)' : 'Entrez votre clé API pour activer Claude'}
+            {hasKey ? 'Propulsé par Claude (Anthropic)' : 'Définir EXPO_PUBLIC_ANTHROPIC_API_KEY dans .env pour activer Claude'}
           </Text>
 
           <View style={{ height: Platform.OS === 'ios' ? 24 : 8 }} />
@@ -230,36 +214,22 @@ const styles = StyleSheet.create({
   },
   keySection: {
     marginBottom: Spacing.lg,
-    gap: Spacing.sm,
+    backgroundColor: Colors.background,
+    borderRadius: Radii.lg,
+    padding: Spacing.md,
+    gap: Spacing.xs,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   keyLabel: {
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     fontWeight: FontWeight.semibold,
   },
-  keyRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    alignItems: 'center',
-  },
-  keyInput: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    borderRadius: Radii.lg,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    fontSize: FontSize.sm,
-    color: Colors.text,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-  },
-  saveKeyBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: Radii.md,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+  envHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textTertiary,
+    lineHeight: 18,
   },
   examples: {
     marginBottom: Spacing.lg,

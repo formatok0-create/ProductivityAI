@@ -1,4 +1,5 @@
 import { AIParseResult } from '../types';
+import { CLAUDE_API_KEY } from '../contexts/AIContext';
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 
@@ -20,10 +21,17 @@ Règles:
 - Si c'est complexe (plusieurs étapes), utilise type project avec subtasks
 - Retourne UNIQUEMENT le JSON, rien d'autre`;
 
-export async function parseWithClaude(
-  userInput: string,
-  apiKey: string
-): Promise<AIParseResult> {
+/**
+ * Calls Claude API using the key from the environment variable.
+ * NEVER pass the key as a parameter from the UI — read it from the env.
+ */
+export async function parseWithClaude(userInput: string): Promise<AIParseResult> {
+  const apiKey = CLAUDE_API_KEY;
+  if (!apiKey) {
+    console.warn('[Claude] No API key found. Falling back to mock. Set EXPO_PUBLIC_ANTHROPIC_API_KEY in .env');
+    return mockParseResult(userInput);
+  }
+
   const response = await fetch(CLAUDE_API_URL, {
     method: 'POST',
     headers: {
@@ -49,7 +57,6 @@ export async function parseWithClaude(
   try {
     return JSON.parse(text) as AIParseResult;
   } catch {
-    // Fallback: extract JSON from text
     const match = text.match(/\{[\s\S]*\}/);
     if (match) return JSON.parse(match[0]) as AIParseResult;
     throw new Error('Could not parse AI response');

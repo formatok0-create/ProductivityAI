@@ -86,10 +86,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       await storage.seedIfEmpty();
-      await refreshAll();
+      // Check streak reset on every launch
+      const statsWithStreak = await storage.checkAndUpdateStreak();
+      const [t, r, p] = await Promise.all([
+        storage.getTasks(),
+        storage.getRoutines(),
+        storage.getProjects(),
+      ]);
+      setTasks(t);
+      setRoutines(r);
+      setProjects(p);
+      setStats(statsWithStreak);
       setLoading(false);
     })();
-  }, [refreshAll]);
+  }, []);
 
   // ─── Task actions ────────────────────────────────────────────────────────────
 
@@ -124,17 +134,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleTask = useCallback(async (id: string) => {
-    const task = tasks.find(t => t.id === id);
-    if (!task) return;
-    const updated = { ...task, completed: !task.completed };
-    await storage.updateTask(updated);
-    setTasks(prev => prev.map(t => (t.id === id ? updated : t)));
-    if (updated.completed) {
-      const newStats = await storage.addXP(updated.xp);
-      await storage.incrementTasksCompleted();
-      setStats(newStats);
-    }
-  }, [tasks]);
+    // Use functional updater to avoid stale closure on rapid toggles
+    let xpToAdd = 0;
+    let wasCompleted = false;
+    setTasks(prev => {
+      const task = prev.find(t => t.id === id);
+      if (!task) return prev;
+      const updated = { ...task, completed: !task.completed };
+      if (updated.completed) {
+        xpToAdd = updated.xp;
+        wasCompleted = true;
+      }
+      storage.updateTask(updated); // fire-and-forget
+      return prev.map(t => (t.id === id ? updated : t));
+    });
+    // Defer XP update after state settles
+    setTimeout(async () => {
+      if (wasCompleted && xpToAdd > 0) {
+        const newStats = await storage.addXP(xpToAdd);
+        await storage.incrementTasksCompleted();
+        setStats(newStats);
+      }
+    }, 0);
+  }, []);
 
   // ─── Routine actions ─────────────────────────────────────────────────────────
 
@@ -169,20 +191,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleRoutine = useCallback(async (id: string) => {
-    const routine = routines.find(r => r.id === id);
-    if (!routine) return;
-    const updated = {
-      ...routine,
-      completed: !routine.completed,
-      streak: !routine.completed ? routine.streak + 1 : Math.max(0, routine.streak - 1),
-    };
-    await storage.updateRoutine(updated);
-    setRoutines(prev => prev.map(r => (r.id === id ? updated : r)));
-    if (updated.completed) {
-      const newStats = await storage.addXP(updated.xp);
-      setStats(newStats);
-    }
-  }, [routines]);
+    let xpToAdd = 0;
+    let wasCompleted = false;
+    setRoutines(prev => {
+      const routine = prev.find(r => r.id === id);
+      if (!routine) return prev;
+      const updated = {
+        ...routine,
+        completed: !routine.completed,
+        streak: !routine.completed ? routine.streak + 1 : Math.max(0, routine.streak - 1),
+      };
+      if (updated.completed) {
+        xpToAdd = updated.xp;
+        wasCompleted = true;
+      }
+      storage.updateRoutine(updated); // fire-and-forget
+      return prev.map(r => (r.id === id ? updated : r));
+    });
+    setTimeout(async () => {
+      if (wasCompleted && xpToAdd > 0) {
+        const newStats = await storage.addXP(xpToAdd);
+        setStats(newStats);
+      }
+    }, 0);
+  }, []);
 
   // ─── Project actions ─────────────────────────────────────────────────────────
 

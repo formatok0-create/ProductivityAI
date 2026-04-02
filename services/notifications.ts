@@ -95,24 +95,29 @@ export async function scheduleRoutineNotification(
       minute = parts[1] ?? defaultMinute;
     }
 
-    const repeatFrequency =
-      routine.repeat === 'weekly'
-        ? Notifications.SchedulableTriggerInputTypes.WEEKLY
-        : Notifications.SchedulableTriggerInputTypes.DAILY;
+    // Fix: use the correct trigger type based on repeat frequency
+    const isWeekly = routine.repeat === 'weekly';
 
     const id = await Notifications.scheduleNotificationAsync({
       content: {
-        title: '🔄 Routine du jour',
+        title: isWeekly ? '📅 Routine hebdo' : '🔄 Routine du jour',
         body: routine.title,
         data: { routineId: routine.id, type: 'routine' },
         sound: true,
         badge: 1,
       },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DAILY,
-        hour,
-        minute,
-      },
+      trigger: isWeekly
+        ? {
+            type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+            weekday: 2, // Monday by default
+            hour,
+            minute,
+          }
+        : {
+            type: Notifications.SchedulableTriggerInputTypes.DAILY,
+            hour,
+            minute,
+          },
     });
 
     return id;

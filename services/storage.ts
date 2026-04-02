@@ -9,12 +9,65 @@ const KEYS = {
 };
 
 const DEFAULT_STATS: UserStats = {
-  streak: 7,
-  totalXP: 1240,
-  level: 5,
-  tasksCompleted: 23,
-  routinesCompleted: 15,
+  streak: 0,
+  totalXP: 0,
+  level: 1,
+  tasksCompleted: 0,
+  routinesCompleted: 0,
 };
+
+// ─── Streak logic ─────────────────────────────────────────────────────────────
+
+const LAST_ACTIVE_KEY = '@productivity_last_active';
+
+/**
+ * Call once on app launch. Resets streak to 0 if the user missed yesterday.
+ */
+export async function checkAndUpdateStreak(): Promise<UserStats> {
+  const today = new Date().toISOString().split('T')[0];
+  const lastActive = await AsyncStorage.getItem(LAST_ACTIVE_KEY);
+
+  const stats = await getStats();
+
+  if (!lastActive) {
+    // First launch
+    await AsyncStorage.setItem(LAST_ACTIVE_KEY, today);
+    return stats;
+  }
+
+  const last = new Date(lastActive);
+  const now = new Date(today);
+  const diffDays = Math.floor((now.getTime() - last.getTime()) / 86_400_000);
+
+  if (diffDays === 0) return stats; // same day, no change
+
+  if (diffDays > 1) {
+    // Missed at least one day — reset streak
+    stats.streak = 0;
+    await AsyncStorage.setItem(KEYS.STATS, JSON.stringify(stats));
+  }
+
+  // Update last active date
+  await AsyncStorage.setItem(LAST_ACTIVE_KEY, today);
+  return stats;
+}
+
+/**
+ * Increment streak by 1 (call when user completes first item of the day).
+ */
+export async function incrementStreak(): Promise<UserStats> {
+  const today = new Date().toISOString().split('T')[0];
+  const lastActive = await AsyncStorage.getItem(LAST_ACTIVE_KEY);
+  const stats = await getStats();
+
+  // Only increment once per day
+  if (lastActive === today) return stats;
+
+  stats.streak += 1;
+  await AsyncStorage.setItem(KEYS.STATS, JSON.stringify(stats));
+  await AsyncStorage.setItem(LAST_ACTIVE_KEY, today);
+  return stats;
+}
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 
@@ -143,6 +196,13 @@ export async function addXP(amount: number): Promise<UserStats> {
 export async function incrementTasksCompleted(): Promise<void> {
   const stats = await getStats();
   stats.tasksCompleted += 1;
+  stats.routinesCompleted = stats.routinesCompleted; // keep unchanged
+  await AsyncStorage.setItem(KEYS.STATS, JSON.stringify(stats));
+}
+
+export async function incrementRoutinesCompleted(): Promise<void> {
+  const stats = await getStats();
+  stats.routinesCompleted += 1;
   await AsyncStorage.setItem(KEYS.STATS, JSON.stringify(stats));
 }
 
@@ -153,13 +213,14 @@ export async function seedIfEmpty(): Promise<void> {
   if (tasks.length > 0) return;
 
   const now = new Date().toISOString();
+  const todayDate = new Date().toISOString().split('T')[0];
 
   const seedTasks: Task[] = [
     {
       id: 'task-1',
       title: 'Finir le rapport Q2',
       time: '10:00',
-      date: new Date().toISOString().split('T')[0],
+      date: todayDate,
       completed: false,
       priority: 'high',
       createdAt: now,
@@ -169,7 +230,7 @@ export async function seedIfEmpty(): Promise<void> {
       id: 'task-2',
       title: 'Appel client Acme Corp',
       time: '14:30',
-      date: new Date().toISOString().split('T')[0],
+      date: todayDate,
       completed: false,
       priority: 'medium',
       createdAt: now,
@@ -193,7 +254,7 @@ export async function seedIfEmpty(): Promise<void> {
       time: '07:00',
       repeat: 'daily',
       completed: false,
-      streak: 12,
+      streak: 0,
       color: '#CE82FF',
       icon: 'meditation',
       createdAt: now,
@@ -205,7 +266,7 @@ export async function seedIfEmpty(): Promise<void> {
       time: '07:30',
       repeat: 'daily',
       completed: false,
-      streak: 5,
+      streak: 0,
       color: '#1CB0F6',
       icon: 'sport',
       createdAt: now,
@@ -217,7 +278,7 @@ export async function seedIfEmpty(): Promise<void> {
       time: '20:00',
       repeat: 'weekly',
       completed: false,
-      streak: 3,
+      streak: 0,
       color: '#FF9600',
       icon: 'reading',
       createdAt: now,
@@ -252,5 +313,6 @@ export async function seedIfEmpty(): Promise<void> {
   await saveTasks(seedTasks);
   await saveRoutines(seedRoutines);
   await saveProjects(seedProjects);
+  // Fresh users start at zero
   await AsyncStorage.setItem(KEYS.STATS, JSON.stringify(DEFAULT_STATS));
 }

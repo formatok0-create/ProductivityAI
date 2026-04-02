@@ -32,7 +32,10 @@ export default function DashboardScreen() {
   const { isListening, setIsListening, aiModalVisible, setAiModalVisible } = useAI();
   const [addModalType, setAddModalType] = useState<'task' | 'routine' | 'project' | null>(null);
 
-  const todayTasks = tasks.filter(t => !t.completed).slice(0, 3);
+  // Show only tasks with today's date OR no date set (undated tasks always appear)
+  const todayTasks = tasks
+    .filter(t => !t.completed && (!t.date || t.date === today))
+    .slice(0, 3);
   const nextTask = todayTasks[0];
 
   const completedToday = tasks.filter(t => t.completed).length;
