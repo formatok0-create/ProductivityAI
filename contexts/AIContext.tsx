@@ -1,20 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 
-/**
- * SECURITY NOTE
- * ────────────────────────────────────────────────────────────────────
- * Never hardcode your Anthropic API key here or anywhere in the client bundle.
- * The recommended approach is a server-side proxy (Supabase Edge Function).
- * Until then, the key is read from the EXPO_PUBLIC_ANTHROPIC_API_KEY env var,
- * which is acceptable for local/dev use but MUST be rotated before production.
- *
- * To use:
- *   1. Create a .env file at the project root
- *   2. Add:  EXPO_PUBLIC_ANTHROPIC_API_KEY=sk-ant-...
- *   3. Never commit .env to version control
- */
-export const CLAUDE_API_KEY: string =
-  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY) ?? '';
+// OnSpace AI est utilisé — aucune clé API externe requise.
+// Les credentials sont injectés automatiquement par la plateforme.
 
 interface AIContextType {
   isListening: boolean;

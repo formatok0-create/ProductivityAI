@@ -1,7 +1,10 @@
 import { AIParseResult } from '../types';
-import { CLAUDE_API_KEY } from '../contexts/AIContext';
 
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+// OnSpace AI — no API key needed, managed by the platform
+const ONSPACE_AI_BASE_URL: string =
+  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ONSPACE_AI_BASE_URL) ?? '';
+const ONSPACE_AI_API_KEY: string =
+  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_ONSPACE_AI_API_KEY) ?? '';
 
 const SYSTEM_PROMPT = `Tu es un assistant de productivité. Analyse le message de l'utilisateur et retourne UNIQUEMENT un JSON valide (sans markdown, sans explication) avec ce format exact:
 
@@ -22,37 +25,36 @@ Règles:
 - Retourne UNIQUEMENT le JSON, rien d'autre`;
 
 /**
- * Calls Claude API using the key from the environment variable.
- * NEVER pass the key as a parameter from the UI — read it from the env.
+ * Calls OnSpace AI (google/gemini-3-flash-preview) — no external API key required.
+ * Credentials are injected automatically by the OnSpace platform via env vars.
  */
 export async function parseWithClaude(userInput: string): Promise<AIParseResult> {
-  const apiKey = CLAUDE_API_KEY;
-  if (!apiKey) {
-    console.warn('[Claude] No API key found. Falling back to mock. Set EXPO_PUBLIC_ANTHROPIC_API_KEY in .env');
+  if (!ONSPACE_AI_BASE_URL || !ONSPACE_AI_API_KEY) {
+    console.warn('[OnSpace AI] Env vars not set. Falling back to mock.');
     return mockParseResult(userInput);
   }
 
-  const response = await fetch(CLAUDE_API_URL, {
+  const response = await fetch(`${ONSPACE_AI_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      'Authorization': `Bearer ${ONSPACE_AI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 512,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userInput }],
+      model: 'google/gemini-3-flash-preview',
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userInput },
+      ],
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`Claude API error: ${response.status}`);
+    throw new Error(`OnSpace AI error: ${response.status}`);
   }
 
   const data = await response.json();
-  const text = data.content?.[0]?.text ?? '';
+  const text: string = data.choices?.[0]?.message?.content ?? '';
 
   try {
     return JSON.parse(text) as AIParseResult;
