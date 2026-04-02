@@ -28,21 +28,15 @@ import { parseWithClaude } from '../../services/claude';
 import { useAI } from '../../contexts/AIContext';
 import { AIParseResult } from '../../types';
 
-// Conditionally import Voice to avoid crashes if not available
-let Voice: any = null;
-try {
-  Voice = require('@react-native-voice/voice').default;
-} catch {
-  Voice = null;
+// ─── Web Speech API types ────────────────────────────────────────────────────
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
 }
 
-interface Props {
-  visible: boolean;
-  onClose: () => void;
-  onResult: (result: AIParseResult) => void;
-}
-
-// ─── Waveform bars ────────────────────────────────────────────────────────────
+// ─── Waveform bars ───────────────────────────────────────────────────────────
 function WaveBar({ delay, color }: { delay: number; color: string }) {
   const height = useSharedValue(6);
   useEffect(() => {
@@ -72,7 +66,7 @@ const wave = StyleSheet.create({
   },
 });
 
-// ─── Pulse ring ───────────────────────────────────────────────────────────────
+// ─── Pulse ring ──────────────────────────────────────────────────────────────
 function PulseRing({ active }: { active: boolean }) {
   const scale = useSharedValue(1);
   const opacity = useSharedValue(0);
@@ -112,109 +106,119 @@ const pr = StyleSheet.create({
   },
 });
 
-// ─── Main modal ───────────────────────────────────────────────────────────────
+// ─── Speech hook (Web Speech API only — no native module needed) ─────────────
+function useSpeechRecognition() {
+  const recognitionRef = useRef<any>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [partialText, setPartialText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const isSupported = Platform.OS === 'web' && (
+    typeof window !== 'undefined' &&
+    (window.SpeechRecognition || window.webkitSpeechRecognition)
+  );
+
+  const start = useCallback((onResult: (text: string) => void) => {
+    if (!isSupported) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    rec.lang = 'fr-FR';
+    rec.interimResults = true;
+    rec.continuous = false;
+    recognitionRef.current = rec;
+
+    rec.onstart = () => {
+      setIsListening(true);
+      setError(null);
+      setPartialText('');
+    };
+
+    rec.onresult = (e: any) => {
+      let interim = '';
+      let final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          final += t;
+        } else {
+          interim += t;
+        }
+      }
+      setPartialText(interim || final);
+      if (final) {
+        onResult(final);
+        setIsListening(false);
+      }
+    };
+
+    rec.onerror = (e: any) => {
+      if (e.error !== 'no-speech') {
+        setError('Micro inaccessible — vérifiez les permissions du navigateur');
+      }
+      setIsListening(false);
+    };
+
+    rec.onend = () => {
+      setIsListening(false);
+    };
+
+    try {
+      rec.start();
+    } catch {
+      setError('Impossible de démarrer la reconnaissance vocale');
+    }
+  }, [isSupported]);
+
+  const stop = useCallback(() => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
+  }, []);
+
+  return { isSupported, isListening, partialText, error, start, stop, setPartialText };
+}
+
+// ─── Main modal ──────────────────────────────────────────────────────────────
+interface Props {
+  visible: boolean;
+  onClose: () => void;
+  onResult: (result: AIParseResult) => void;
+}
+
 export function AIModal({ visible, onClose, onResult }: Props) {
   useAI();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [partialText, setPartialText] = useState('');
-  const voiceAvailable = Voice !== null && Platform.OS !== 'web';
+  const { isSupported, isListening, partialText, error, start, stop, setPartialText } = useSpeechRecognition();
 
-  // ─── Voice setup ───────────────────────────────────────────────────────────
+  // Stop on close
   useEffect(() => {
-    if (!voiceAvailable) return;
-
-    Voice.onSpeechStart = () => {
-      setIsListening(true);
-      setVoiceError(null);
-    };
-
-    Voice.onSpeechEnd = () => {
-      setIsListening(false);
-    };
-
-    Voice.onSpeechError = (e: any) => {
-      setIsListening(false);
-      const msg: string = e?.error?.message ?? '';
-      // Ignore "no speech" errors silently
-      if (!msg.includes('7') && !msg.includes('no-speech')) {
-        setVoiceError('Parlez plus fort ou réessayez');
-      }
-    };
-
-    Voice.onSpeechPartialResults = (e: any) => {
-      const partial: string = e.value?.[0] ?? '';
-      setPartialText(partial);
-    };
-
-    Voice.onSpeechResults = (e: any) => {
-      const text: string = e.value?.[0] ?? '';
-      if (text) {
-        setInput(text);
-        setPartialText('');
-      }
-      setIsListening(false);
-    };
-
-    return () => {
-      if (Voice) {
-        Voice.destroy().then(Voice.removeAllListeners).catch(() => {});
-      }
-    };
-  }, [voiceAvailable]);
-
-  // Stop listening when modal closes
-  useEffect(() => {
-    if (!visible && isListening && voiceAvailable) {
-      Voice?.stop().catch(() => {});
-      setIsListening(false);
-    }
+    if (!visible && isListening) stop();
   }, [visible]);
 
-  const startListening = useCallback(async () => {
-    if (!voiceAvailable) {
+  const toggleMic = useCallback(() => {
+    if (!isSupported) {
       Alert.alert(
         'Reconnaissance vocale',
-        'La reconnaissance vocale nest pas disponible sur cette plateforme. Utilisez la saisie texte.',
+        'La saisie vocale est disponible uniquement via le navigateur web. Sur mobile, utilisez la saisie texte ou le clavier vocal du système.',
         [{ text: 'OK' }]
       );
       return;
     }
-    try {
-      setVoiceError(null);
-      setPartialText('');
-      setInput('');
-      await Voice.start('fr-FR');
-    } catch (e: any) {
-      setVoiceError('Impossible de démarrer le micro. Vérifiez les permissions.');
-      setIsListening(false);
-    }
-  }, [voiceAvailable]);
-
-  const stopListening = useCallback(async () => {
-    if (!voiceAvailable) return;
-    try {
-      await Voice.stop();
-    } catch {
-      setIsListening(false);
-    }
-  }, [voiceAvailable]);
-
-  const toggleMic = useCallback(() => {
     if (isListening) {
-      stopListening();
+      stop();
     } else {
-      startListening();
+      start((text) => {
+        setInput(text);
+        setPartialText('');
+      });
     }
-  }, [isListening, startListening, stopListening]);
+  }, [isSupported, isListening, start, stop, setPartialText]);
 
-  // ─── Send ──────────────────────────────────────────────────────────────────
+  // ─── Send ─────────────────────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
     const text = (input || partialText).trim();
     if (!text) return;
-    if (isListening) await stopListening();
+    if (isListening) stop();
     setLoading(true);
     try {
       const result = await parseWithClaude(text);
@@ -227,7 +231,7 @@ export function AIModal({ visible, onClose, onResult }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [input, partialText, isListening, stopListening, onResult, onClose]);
+  }, [input, partialText, isListening, stop, onResult, onClose]);
 
   const displayText = isListening ? partialText : input;
   const canSend = (input.trim() || partialText.trim()) && !loading;
@@ -258,16 +262,12 @@ export function AIModal({ visible, onClose, onResult }: Props) {
 
           {/* Mic section */}
           <View style={styles.micSection}>
-            {/* Pulse ring behind mic */}
             <View style={styles.micRingWrapper}>
               <PulseRing active={isListening} />
               <PressableScale
                 onPress={toggleMic}
                 scaleTo={0.88}
-                style={[
-                  styles.micBtn,
-                  isListening && styles.micBtnActive,
-                ]}
+                style={[styles.micBtn, isListening && styles.micBtnActive]}
               >
                 <MaterialIcons
                   name={isListening ? 'mic' : 'mic-none'}
@@ -277,7 +277,6 @@ export function AIModal({ visible, onClose, onResult }: Props) {
               </PressableScale>
             </View>
 
-            {/* Waveform */}
             {isListening ? (
               <View style={styles.waveform}>
                 {[0, 60, 120, 80, 40, 100, 30, 70, 110, 50].map((d, i) => (
@@ -286,19 +285,16 @@ export function AIModal({ visible, onClose, onResult }: Props) {
               </View>
             ) : (
               <Text style={styles.micHint}>
-                {voiceAvailable
-                  ? isListening
-                    ? 'Parlez maintenant...'
-                    : 'Appuyez sur le micro pour dicter'
-                  : 'Saisie vocale non disponible sur web'}
+                {isSupported
+                  ? 'Appuyez sur le micro pour dicter'
+                  : 'Saisie vocale disponible sur navigateur web'}
               </Text>
             )}
 
-            {/* Voice error */}
-            {voiceError ? (
+            {error ? (
               <View style={styles.errorRow}>
                 <MaterialIcons name="error-outline" size={15} color={Colors.danger} />
-                <Text style={styles.errorText}>{voiceError}</Text>
+                <Text style={styles.errorText}>{error}</Text>
               </View>
             ) : null}
           </View>
@@ -408,7 +404,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
   },
-  // ── Mic section
   micSection: {
     alignItems: 'center',
     marginBottom: Spacing.lg,
@@ -460,7 +455,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.danger,
   },
-  // ── Examples
   examples: {
     marginBottom: Spacing.lg,
     gap: Spacing.sm,
@@ -487,7 +481,6 @@ const styles = StyleSheet.create({
     color: Colors.primaryDark,
     fontWeight: FontWeight.medium,
   },
-  // ── Input row
   inputRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
