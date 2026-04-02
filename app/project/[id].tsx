@@ -29,6 +29,8 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { CheckButton } from '../../components/ui/CheckButton';
 import { PriorityBadge } from '../../components/ui/PriorityBadge';
+import { TaskCard } from '../../components/feature/TaskCard';
+import { formatDuration } from '../../hooks/useTaskTimer';
 
 // ─── Kanban column config ─────────────────────────────────────────────────────
 
@@ -57,10 +59,11 @@ interface DragRowProps {
   onToggle: () => void;
   onDelete?: () => void;
   onLongPress?: () => void;
+  onTimerToggle?: () => void;
   color: string;
 }
 
-function DragTaskRow({ task, drag, isActive, onToggle, onDelete, onLongPress, color }: DragRowProps) {
+function DragTaskRow({ task, drag, isActive, onToggle, onDelete, onLongPress, onTimerToggle, color }: DragRowProps) {
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ scale: withSpring(isActive ? 1.03 : 1, { damping: 14 }) }],
     shadowOpacity: withTiming(isActive ? 0.18 : 0.06, { duration: 200 }),
@@ -94,6 +97,20 @@ function DragTaskRow({ task, drag, isActive, onToggle, onDelete, onLongPress, co
           </View>
         </PressableScale>
 
+        {onTimerToggle && !task.completed ? (
+          <PressableScale
+            onPress={onTimerToggle}
+            scaleTo={0.82}
+            style={[styles.timerBtnSmall, task.timerStartedAt ? styles.timerBtnSmallActive : null]}
+          >
+            <MaterialIcons
+              name={task.timerStartedAt ? 'pause' : 'play-arrow'}
+              size={16}
+              color={task.timerStartedAt ? '#fff' : Colors.primary}
+            />
+          </PressableScale>
+        ) : null}
+
         {onDelete ? (
           <PressableScale onPress={onDelete} scaleTo={0.85} style={styles.deleteBtnSmall}>
             <MaterialIcons name="delete-outline" size={18} color={Colors.textTertiary} />
@@ -115,12 +132,15 @@ interface KanbanCardProps {
   projectColor: string;
   onToggle: () => void;
   onStatusChange: (status: TaskStatus) => void;
+  onTimerToggle?: () => void;
   onDelete?: () => void;
   onLongPress?: () => void;
+  showTotalTime?: boolean;
 }
 
-function KanbanCard({ task, projectColor, onToggle, onStatusChange, onDelete, onLongPress }: KanbanCardProps) {
+function KanbanCard({ task, projectColor, onToggle, onStatusChange, onTimerToggle, onDelete, onLongPress, showTotalTime }: KanbanCardProps) {
   const status = getStatus(task);
+  const hasTrackedTime = (task.totalTimeSeconds ?? 0) > 0;
 
   return (
     <PressableScale onPress={undefined} onLongPress={onLongPress} scaleTo={0.98}>
@@ -131,6 +151,17 @@ function KanbanCard({ task, projectColor, onToggle, onStatusChange, onDelete, on
             {task.title}
           </Text>
           {task.time ? <Text style={styles.kanbanTime}>{task.time}</Text> : null}
+
+          {/* Total time tracked — shown in Terminé column */}
+          {showTotalTime && hasTrackedTime ? (
+            <View style={styles.kanbanTimeChip}>
+              <MaterialIcons name="timer" size={11} color={Colors.primary} />
+              <Text style={styles.kanbanTimeChipText}>
+                {formatDuration(task.totalTimeSeconds ?? 0)}
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.kanbanActions}>
             {KANBAN_COLUMNS.map(col => (
               <PressableScale
@@ -156,6 +187,21 @@ function KanbanCard({ task, projectColor, onToggle, onStatusChange, onDelete, on
                 </View>
               </PressableScale>
             ))}
+
+            {onTimerToggle && !task.completed ? (
+              <PressableScale
+                onPress={onTimerToggle}
+                scaleTo={0.85}
+                style={[styles.kanbanTimerBtn, task.timerStartedAt ? styles.kanbanTimerBtnActive : null]}
+              >
+                <MaterialIcons
+                  name={task.timerStartedAt ? 'pause' : 'play-arrow'}
+                  size={13}
+                  color={task.timerStartedAt ? '#fff' : Colors.primary}
+                />
+              </PressableScale>
+            ) : null}
+
             {onDelete ? (
               <PressableScale onPress={onDelete} scaleTo={0.85} style={styles.kanbanDelete}>
                 <MaterialIcons name="delete-outline" size={15} color={Colors.textTertiary} />
@@ -179,14 +225,17 @@ interface KanbanColumnProps {
   projectColor: string;
   onToggle: (id: string) => void;
   onStatusChange: (id: string, status: TaskStatus) => void;
+  onTimerToggle: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (task: Task) => void;
 }
 
 function KanbanColumn({
-  label, icon, color, tasks, projectColor,
-  onToggle, onStatusChange, onDelete, onEdit,
+  status, label, icon, color, tasks, projectColor,
+  onToggle, onStatusChange, onTimerToggle, onDelete, onEdit,
 }: KanbanColumnProps) {
+  const isDoneColumn = status === 'done';
+
   return (
     <View style={styles.kanbanColumn}>
       <View style={[styles.kanbanColHeader, { borderBottomColor: color }]}>
@@ -195,6 +244,14 @@ function KanbanColumn({
         <View style={[styles.kanbanCount, { backgroundColor: color + '20' }]}>
           <Text style={[styles.kanbanCountText, { color }]}>{tasks.length}</Text>
         </View>
+        {isDoneColumn && tasks.length > 0 ? (
+          <View style={styles.kanbanTotalTime}>
+            <MaterialIcons name="timer" size={11} color={Colors.primary} />
+            <Text style={styles.kanbanTotalTimeText}>
+              {formatDuration(tasks.reduce((acc, t) => acc + (t.totalTimeSeconds ?? 0), 0))}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <ScrollView
@@ -214,8 +271,10 @@ function KanbanColumn({
               projectColor={projectColor}
               onToggle={() => onToggle(task.id)}
               onStatusChange={s => onStatusChange(task.id, s)}
+              onTimerToggle={() => onTimerToggle(task.id)}
               onDelete={() => onDelete(task.id)}
               onLongPress={() => onEdit(task)}
+              showTotalTime={isDoneColumn}
             />
           ))
         )}
@@ -233,7 +292,7 @@ export default function ProjectDetailScreen() {
   const insets = useSafeAreaInsets();
   const {
     projects, tasks, toggleTask, deleteTask,
-    addTask, updateTask, updateProject, reorderProjectTasks,
+    addTask, updateTask, updateProject, reorderProjectTasks, toggleTaskTimer,
   } = useApp();
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -280,8 +339,9 @@ export default function ProjectDetailScreen() {
       onToggle={() => toggleTask(item.id)}
       onDelete={() => deleteTask(item.id)}
       onLongPress={() => setEditTask(item)}
+      onTimerToggle={() => toggleTaskTimer(item.id)}
     />
-  ), [project, toggleTask, deleteTask]);
+  ), [project, toggleTask, deleteTask, toggleTaskTimer]);
 
   if (!project) {
     return (
@@ -409,6 +469,7 @@ export default function ProjectDetailScreen() {
                 projectColor={project.color}
                 onToggle={toggleTask}
                 onStatusChange={handleStatusChange}
+                onTimerToggle={toggleTaskTimer}
                 onDelete={deleteTask}
                 onEdit={setEditTask}
               />
@@ -537,6 +598,20 @@ const styles = StyleSheet.create({
   },
   timeText: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.medium },
   deleteBtnSmall: { padding: Spacing.xs },
+  timerBtnSmall: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.primary + '40',
+  },
+  timerBtnSmallActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
   dragHandle: { padding: Spacing.xs },
   strikethrough: { textDecorationLine: 'line-through', color: Colors.textTertiary },
 
@@ -602,6 +677,54 @@ const styles = StyleSheet.create({
   },
   kanbanStatusText: { fontSize: 10, fontWeight: FontWeight.semibold, color: Colors.textTertiary },
   kanbanDelete: { padding: 3, marginLeft: 'auto' },
+  kanbanTimerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.primaryLight,
+    borderWidth: 1,
+    borderColor: Colors.primary + '40',
+  },
+  kanbanTimerBtnActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  kanbanTimeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    alignSelf: 'flex-start',
+    marginBottom: 2,
+  },
+  kanbanTimeChipText: {
+    fontSize: 10,
+    fontWeight: FontWeight.bold,
+    color: Colors.primaryDark,
+    fontVariant: ['tabular-nums'],
+  },
+  kanbanTotalTime: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    marginLeft: 'auto',
+  },
+  kanbanTotalTimeText: {
+    fontSize: 10,
+    fontWeight: FontWeight.bold,
+    color: Colors.primaryDark,
+    fontVariant: ['tabular-nums'],
+  },
 
   // Empty / misc
   empty: { alignItems: 'center', paddingTop: 48, gap: Spacing.md },
