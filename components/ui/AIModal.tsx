@@ -17,7 +17,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontSize, FontWeight, Radii, Shadow, Spacing } from '../../constants/theme';
 import { PressableScale } from './PressableScale';
 import { parseWithClaude } from '../../services/claude';
-import { CLAUDE_API_KEY, useAI } from '../../contexts/AIContext';
+import { useAI } from '../../contexts/AIContext';
 import { AIParseResult } from '../../types';
 
 interface Props {
@@ -30,8 +30,6 @@ export function AIModal({ visible, onClose, onResult }: Props) {
   useAI(); // keep context subscription
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showEnvInfo, setShowEnvInfo] = useState(false);
-  const hasKey = Boolean(CLAUDE_API_KEY);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -44,7 +42,7 @@ export function AIModal({ visible, onClose, onResult }: Props) {
       setInput('');
       onClose();
     } catch {
-      Alert.alert('Erreur IA', 'Impossible de traiter la demande. Vérifiez EXPO_PUBLIC_ANTHROPIC_API_KEY dans .env');
+      Alert.alert('Erreur IA', 'Impossible de traiter la demande. Veuillez réessayer.');
     } finally {
       setLoading(false);
     }
@@ -64,40 +62,17 @@ export function AIModal({ visible, onClose, onResult }: Props) {
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <Image
-                source={require('../../assets/images/mic_visual.png')}
-                style={styles.aiAvatar}
-                contentFit="cover"
-              />
+              <View style={styles.aiAvatarBox}>
+                <MaterialIcons name="auto-awesome" size={24} color="#fff" />
+              </View>
               <View>
                 <Text style={styles.headerTitle}>Assistant IA</Text>
-                <Text style={styles.headerSubtitle}>
-                  {hasKey ? 'Claude API' : 'Mode démo'}
-                </Text>
+                <Text style={styles.headerSubtitle}>OnSpace AI · Gemini Flash</Text>
               </View>
             </View>
-            <PressableScale onPress={() => setShowEnvInfo(v => !v)} scaleTo={0.9}>
-              <View style={styles.keyBtn}>
-                <MaterialIcons name="vpn-key" size={18} color={hasKey ? Colors.primary : Colors.textTertiary} />
-              </View>
-            </PressableScale>
           </View>
 
-          {/* Env info panel */}
-          {showEnvInfo ? (
-            <View style={styles.keySection}>
-              <Text style={styles.keyLabel}>
-                {hasKey
-                  ? '✅ Clé API détectée via EXPO_PUBLIC_ANTHROPIC_API_KEY'
-                  : '⚠️ Aucune clé API détectée'}
-              </Text>
-              {!hasKey ? (
-                <Text style={styles.envHint}>
-                  {'Créez un fichier .env à la racine :\nEXPO_PUBLIC_ANTHROPIC_API_KEY=sk-ant-...'}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
+
 
           {/* Examples */}
           <View style={styles.examples}>
@@ -143,9 +118,7 @@ export function AIModal({ visible, onClose, onResult }: Props) {
             </PressableScale>
           </View>
 
-          <Text style={styles.hint}>
-            {hasKey ? 'Propulsé par Claude (Anthropic)' : 'Définir EXPO_PUBLIC_ANTHROPIC_API_KEY dans .env pour activer Claude'}
-          </Text>
+          <Text style={styles.hint}>Propulsé par OnSpace AI</Text>
 
           <View style={{ height: Platform.OS === 'ios' ? 24 : 8 }} />
         </View>
@@ -190,10 +163,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.md,
   },
-  aiAvatar: {
+  aiAvatarBox: {
     width: 44,
     height: 44,
     borderRadius: 22,
+    backgroundColor: Colors.teal,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
     fontSize: FontSize.lg,
@@ -204,33 +180,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
   },
-  keyBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.borderLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  keySection: {
-    marginBottom: Spacing.lg,
-    backgroundColor: Colors.background,
-    borderRadius: Radii.lg,
-    padding: Spacing.md,
-    gap: Spacing.xs,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  keyLabel: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    fontWeight: FontWeight.semibold,
-  },
-  envHint: {
-    fontSize: FontSize.xs,
-    color: Colors.textTertiary,
-    lineHeight: 18,
-  },
+
   examples: {
     marginBottom: Spacing.lg,
     gap: Spacing.sm,
