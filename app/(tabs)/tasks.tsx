@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingHorizontal: Spacing.lg,
-    paddingBottom: 120,
+    paddingBottom: 110,
   },
   empty: {
     alignItems: 'center',
