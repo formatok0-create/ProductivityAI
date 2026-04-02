@@ -15,6 +15,9 @@ export interface Task {
   projectId?: string;
   createdAt: string;
   xp: number;
+  // Chrono
+  totalTimeSeconds?: number;   // total accumulated seconds
+  timerStartedAt?: string;     // ISO timestamp of last start (null = paused)
 }
 
 export interface Routine {

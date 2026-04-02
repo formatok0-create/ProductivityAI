@@ -30,6 +30,7 @@ interface AppContextType {
   updateTask: (task: Task) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
+  toggleTaskTimer: (id: string) => Promise<void>;
 
   // Routine actions
   addRoutine: (routine: Routine) => Promise<void>;
@@ -135,21 +136,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleTask = useCallback(async (id: string) => {
-    // Use functional updater to avoid stale closure on rapid toggles
     let xpToAdd = 0;
     let wasCompleted = false;
     setTasks(prev => {
       const task = prev.find(t => t.id === id);
       if (!task) return prev;
       const updated = { ...task, completed: !task.completed };
+      // Stop timer if task is completed
+      if (updated.completed && task.timerStartedAt) {
+        const extra = Math.floor(
+          (Date.now() - new Date(task.timerStartedAt).getTime()) / 1000
+        );
+        updated.totalTimeSeconds = (task.totalTimeSeconds ?? 0) + Math.max(0, extra);
+        updated.timerStartedAt = undefined;
+      }
       if (updated.completed) {
         xpToAdd = updated.xp;
         wasCompleted = true;
       }
-      storage.updateTask(updated); // fire-and-forget
+      storage.updateTask(updated);
       return prev.map(t => (t.id === id ? updated : t));
     });
-    // Defer XP update after state settles
     setTimeout(async () => {
       if (wasCompleted && xpToAdd > 0) {
         const newStats = await storage.addXP(xpToAdd);
@@ -158,6 +165,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setStats(newStats);
       }
     }, 0);
+  }, []);
+
+  // ─── Task timer ──────────────────────────────────────────────────────────────
+
+  const toggleTaskTimer = useCallback(async (id: string) => {
+    setTasks(prev => {
+      const task = prev.find(t => t.id === id);
+      if (!task) return prev;
+      const now = new Date().toISOString();
+      let updated: Task;
+      if (task.timerStartedAt) {
+        // Pause: accumulate elapsed seconds
+        const extra = Math.floor(
+          (Date.now() - new Date(task.timerStartedAt).getTime()) / 1000
+        );
+        updated = {
+          ...task,
+          totalTimeSeconds: (task.totalTimeSeconds ?? 0) + Math.max(0, extra),
+          timerStartedAt: undefined,
+        };
+      } else {
+        // Start
+        updated = { ...task, timerStartedAt: now };
+      }
+      storage.updateTask(updated);
+      return prev.map(t => (t.id === id ? updated : t));
+    });
   }, []);
 
   // ─── Routine actions ─────────────────────────────────────────────────────────
@@ -207,7 +241,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         xpToAdd = updated.xp;
         wasCompleted = true;
       }
-      storage.updateRoutine(updated); // fire-and-forget
+      storage.updateRoutine(updated);
       return prev.map(r => (r.id === id ? updated : r));
     });
     setTimeout(async () => {
@@ -245,17 +279,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [tasks]);
 
   const reorderProjectTasks = useCallback(async (projectId: string, reorderedTasks: Task[]) => {
-    // Update in-memory order
     const ids = reorderedTasks.map(t => t.id);
     setTasks(prev => {
       const others = prev.filter(t => t.projectId !== projectId && !ids.includes(t.id));
       return [...reorderedTasks, ...others];
     });
-    // Persist each task
     for (const task of reorderedTasks) {
       await storage.updateTask(task);
     }
-    // Persist project taskIds order
     const project = projects.find(p => p.id === projectId);
     if (project) {
       const updated = { ...project, taskIds: ids };
@@ -293,6 +324,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updateTask,
         deleteTask,
         toggleTask,
+        toggleTaskTimer,
         addRoutine,
         updateRoutine,
         deleteRoutine,

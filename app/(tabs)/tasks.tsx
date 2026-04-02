@@ -21,7 +21,7 @@ const FILTERS = ['Toutes', 'Aujourd\'hui', 'Complétées'];
 
 export default function TasksScreen() {
   const insets = useSafeAreaInsets();
-  const { tasks, toggleTask, deleteTask, addTask } = useApp();
+  const { tasks, toggleTask, deleteTask, addTask, toggleTaskTimer } = useApp();
   const [filter, setFilter] = useState('Toutes');
   const [modalVisible, setModalVisible] = useState(false);
   const [editTask, setEditTask] = useState<Task | null>(null);
@@ -44,6 +44,7 @@ export default function TasksScreen() {
       onToggle={() => toggleTask(item.id)}
       onDelete={() => deleteTask(item.id)}
       onLongPress={() => setEditTask(item)}
+      onTimerToggle={() => toggleTaskTimer(item.id)}
     />
   );
 
