@@ -6,6 +6,9 @@ const KEYS = {
   ROUTINES: '@productivity_routines',
   PROJECTS: '@productivity_projects',
   STATS: '@productivity_stats',
+  DAILY_XP: '@productivity_daily_xp',
+  DAILY_ROUTINES: '@productivity_daily_routines',
+  STREAK_HISTORY: '@productivity_streak_history',
 };
 
 const DEFAULT_STATS: UserStats = {
@@ -190,7 +193,53 @@ export async function addXP(amount: number): Promise<UserStats> {
   stats.totalXP += amount;
   stats.level = Math.floor(stats.totalXP / 300) + 1;
   await AsyncStorage.setItem(KEYS.STATS, JSON.stringify(stats));
+  // Also record in daily XP history
+  await addDailyXP(amount);
   return stats;
+}
+
+// ─── Daily history tracking ───────────────────────────────────────────────────
+
+export async function getDailyXPHistory(): Promise<Record<string, number>> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.DAILY_XP);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+export async function addDailyXP(amount: number): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+  const history = await getDailyXPHistory();
+  history[today] = (history[today] ?? 0) + amount;
+  await AsyncStorage.setItem(KEYS.DAILY_XP, JSON.stringify(history));
+}
+
+export async function getDailyRoutineHistory(): Promise<Record<string, number>> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.DAILY_ROUTINES);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+export async function incrementDailyRoutineCompletion(): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+  const history = await getDailyRoutineHistory();
+  history[today] = (history[today] ?? 0) + 1;
+  await AsyncStorage.setItem(KEYS.DAILY_ROUTINES, JSON.stringify(history));
+}
+
+export async function getStreakHistory(): Promise<Record<string, number>> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.STREAK_HISTORY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+export async function recordDailyStreak(streak: number): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+  const history = await getStreakHistory();
+  history[today] = streak;
+  await AsyncStorage.setItem(KEYS.STREAK_HISTORY, JSON.stringify(history));
 }
 
 export async function incrementTasksCompleted(): Promise<void> {

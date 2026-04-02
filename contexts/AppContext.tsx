@@ -153,6 +153,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (wasCompleted && xpToAdd > 0) {
         const newStats = await storage.addXP(xpToAdd);
         await storage.incrementTasksCompleted();
+        await storage.recordDailyStreak(newStats.streak);
         setStats(newStats);
       }
     }, 0);
@@ -211,6 +212,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTimeout(async () => {
       if (wasCompleted && xpToAdd > 0) {
         const newStats = await storage.addXP(xpToAdd);
+        await storage.incrementRoutinesCompleted();
+        await storage.incrementDailyRoutineCompletion();
+        await storage.recordDailyStreak(newStats.streak);
         setStats(newStats);
       }
     }, 0);
