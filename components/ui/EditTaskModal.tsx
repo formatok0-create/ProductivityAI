@@ -19,6 +19,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Colors, FontSize, FontWeight, Radii, Shadow, Spacing } from '../../constants/theme';
 import { PressableScale } from './PressableScale';
+import { DatePickerField, TimePickerField } from './DateTimePicker';
 import { Task, TaskPriority, TaskStatus } from '../../types';
 import { useApp } from '../../contexts/AppContext';
 import { useNotifications } from '../../contexts/NotificationContext';
@@ -163,32 +164,10 @@ export function EditTaskModal({ visible, task, onClose }: EditTaskModalProps) {
             {/* Date + Time row */}
             <View style={styles.row}>
               <View style={[styles.field, { flex: 1 }]}>
-                <Text style={styles.label}>
-                  <MaterialIcons name="event" size={13} color={Colors.textSecondary} />
-                  {'  '}Date
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  value={date}
-                  onChangeText={setDate}
-                  placeholder="2026-04-15"
-                  placeholderTextColor={Colors.textTertiary}
-                  keyboardType="numbers-and-punctuation"
-                />
+                <DatePickerField label="DATE" value={date} onChange={setDate} />
               </View>
               <View style={[styles.field, { flex: 1 }]}>
-                <Text style={styles.label}>
-                  <MaterialIcons name="access-time" size={13} color={Colors.textSecondary} />
-                  {'  '}Heure
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  value={time}
-                  onChangeText={setTime}
-                  placeholder="14:30"
-                  placeholderTextColor={Colors.textTertiary}
-                  keyboardType="numbers-and-punctuation"
-                />
+                <TimePickerField label="HEURE" value={time} onChange={setTime} />
               </View>
             </View>
 

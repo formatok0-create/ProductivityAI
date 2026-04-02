@@ -13,6 +13,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontSize, FontWeight, Radii, Shadow, Spacing } from '../../constants/theme';
 import { PressableScale } from './PressableScale';
+import { DatePickerField, TimePickerField } from './DateTimePicker';
 import { TaskPriority, RepeatType } from '../../types';
 
 type ModalType = 'task' | 'routine' | 'project';
@@ -116,29 +117,14 @@ export function AddModal({ visible, type, onClose, onSave }: AddModalProps) {
 
             {/* Time */}
             <View style={styles.field}>
-              <Text style={styles.label}>Heure</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="14:30"
-                placeholderTextColor={Colors.textTertiary}
-                value={time}
-                onChangeText={setTime}
-                keyboardType="numbers-and-punctuation"
-              />
+              <TimePickerField label="Heure" value={time} onChange={setTime} />
             </View>
 
             {/* Task-specific */}
             {type === 'task' ? (
               <>
                 <View style={styles.field}>
-                  <Text style={styles.label}>Date</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="2026-04-15"
-                    placeholderTextColor={Colors.textTertiary}
-                    value={date}
-                    onChangeText={setDate}
-                  />
+                  <DatePickerField label="Date" value={date} onChange={setDate} />
                 </View>
                 <View style={styles.field}>
                   <Text style={styles.label}>Priorité</Text>
@@ -178,14 +164,7 @@ export function AddModal({ visible, type, onClose, onSave }: AddModalProps) {
             {/* Project deadline */}
             {type === 'project' ? (
               <View style={styles.field}>
-                <Text style={styles.label}>Date limite</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="2026-06-01"
-                  placeholderTextColor={Colors.textTertiary}
-                  value={deadline}
-                  onChangeText={setDeadline}
-                />
+                <DatePickerField label="Date limite" value={deadline} onChange={setDeadline} />
               </View>
             ) : null}
 

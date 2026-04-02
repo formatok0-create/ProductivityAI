@@ -19,6 +19,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Colors, FontSize, FontWeight, Radii, Shadow, Spacing } from '../../constants/theme';
 import { PressableScale } from './PressableScale';
+import { TimePickerField } from './DateTimePicker';
 import { Routine, RepeatType } from '../../types';
 import { useApp } from '../../contexts/AppContext';
 import { useNotifications } from '../../contexts/NotificationContext';
@@ -168,18 +169,7 @@ export function EditRoutineModal({ visible, routine, onClose }: EditRoutineModal
 
             {/* Time */}
             <View style={styles.field}>
-              <Text style={styles.label}>
-                <MaterialIcons name="access-time" size={13} color={Colors.textSecondary} />
-                {'  '}Heure
-              </Text>
-              <TextInput
-                style={styles.input}
-                value={time}
-                onChangeText={setTime}
-                placeholder="07:00"
-                placeholderTextColor={Colors.textTertiary}
-                keyboardType="numbers-and-punctuation"
-              />
+              <TimePickerField label="HEURE" value={time} onChange={setTime} />
             </View>
 
             {/* Repeat */}
