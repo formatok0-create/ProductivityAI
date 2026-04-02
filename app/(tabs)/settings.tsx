@@ -20,6 +20,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Colors, FontSize, FontWeight, Radii, Shadow, Spacing } from '../../constants/theme';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { useApp } from '../../contexts/AppContext';
 import { PressableScale } from '../../components/ui/PressableScale';
 
 // ─── Time Picker Modal ────────────────────────────────────────────────────────
@@ -406,8 +407,10 @@ export default function SettingsScreen() {
     cancelAll,
   } = useNotifications();
 
+  const { resetAllData } = useApp();
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [cancelConfirmVisible, setCancelConfirmVisible] = useState(false);
+  const [resetConfirmVisible, setResetConfirmVisible] = useState(false);
 
   const handleRequestPermissions = async () => {
     await requestPermissions();
@@ -567,6 +570,15 @@ export default function SettingsScreen() {
             onPress={() => setCancelConfirmVisible(true)}
             right={<MaterialIcons name="chevron-right" size={20} color={Colors.textTertiary} />}
           />
+          <View style={styles.divider} />
+          <SettingRow
+            icon="delete-forever"
+            iconColor="#CC0000"
+            title="Réinitialiser toutes les données"
+            subtitle="Supprimer tâches, routines, projets et stats"
+            onPress={() => setResetConfirmVisible(true)}
+            right={<MaterialIcons name="chevron-right" size={20} color={Colors.textTertiary} />}
+          />
         </SectionCard>
 
         {/* App info */}
@@ -584,6 +596,36 @@ export default function SettingsScreen() {
         onConfirm={(h, m) => setRoutineDefaultTime(h, m)}
         onClose={() => setTimePickerVisible(false)}
       />
+
+      {/* Reset All Data Confirm */}
+      <Modal visible={resetConfirmVisible} transparent animationType="fade">
+        <View style={confirm.overlay}>
+          <View style={confirm.dialog}>
+            <MaterialIcons name="delete-forever" size={44} color="#CC0000" />
+            <Text style={confirm.title}>Réinitialiser les données ?</Text>
+            <Text style={confirm.subtitle}>
+              Toutes vos tâches, routines, projets et statistiques seront définitivement supprimés. Cette action est irréversible.
+            </Text>
+            <View style={confirm.actions}>
+              <TouchableOpacity
+                style={confirm.cancelBtn}
+                onPress={() => setResetConfirmVisible(false)}
+              >
+                <Text style={confirm.cancelText}>Annuler</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[confirm.confirmBtn, { backgroundColor: '#CC0000' }]}
+                onPress={async () => {
+                  await resetAllData();
+                  setResetConfirmVisible(false);
+                }}
+              >
+                <Text style={confirm.confirmText}>Réinitialiser</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Cancel All Confirm */}
       <Modal visible={cancelConfirmVisible} transparent animationType="fade">

@@ -47,6 +47,7 @@ interface AppContextType {
   getProjectTasks: (projectId: string) => Task[];
   reorderProjectTasks: (projectId: string, reorderedTasks: Task[]) => Promise<void>;
   refreshAll: () => Promise<void>;
+  resetAllData: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -263,6 +264,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [projects]);
 
+  const resetAllData = useCallback(async () => {
+    await AsyncStorage.clear();
+    setTasks([]);
+    setRoutines([]);
+    setProjects([]);
+    setStats({ streak: 0, totalXP: 0, level: 1, tasksCompleted: 0, routinesCompleted: 0 });
+  }, []);
+
   const getProjectProgress = useCallback((projectId: string) => {
     const project = projects.find(p => p.id === projectId);
     if (!project || project.taskIds.length === 0) return 0;
@@ -295,6 +304,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         getProjectTasks,
         reorderProjectTasks,
         refreshAll,
+        resetAllData,
       }}
     >
       {children}
