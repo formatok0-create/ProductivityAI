@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,15 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { Image } from 'expo-image';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  withSpring,
+  cancelAnimation,
+} from 'react-native-reanimated';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontSize, FontWeight, Radii, Shadow, Spacing } from '../../constants/theme';
 import { PressableScale } from './PressableScale';
@@ -20,33 +28,209 @@ import { parseWithClaude } from '../../services/claude';
 import { useAI } from '../../contexts/AIContext';
 import { AIParseResult } from '../../types';
 
+// Conditionally import Voice to avoid crashes if not available
+let Voice: any = null;
+try {
+  Voice = require('@react-native-voice/voice').default;
+} catch {
+  Voice = null;
+}
+
 interface Props {
   visible: boolean;
   onClose: () => void;
   onResult: (result: AIParseResult) => void;
 }
 
+// ─── Waveform bars ────────────────────────────────────────────────────────────
+function WaveBar({ delay, color }: { delay: number; color: string }) {
+  const height = useSharedValue(6);
+  useEffect(() => {
+    height.value = withRepeat(
+      withSequence(
+        withTiming(28 + Math.random() * 16, { duration: 250 + delay }),
+        withTiming(6, { duration: 250 + delay })
+      ),
+      -1,
+      false
+    );
+    return () => cancelAnimation(height);
+  }, []);
+  const style = useAnimatedStyle(() => ({
+    height: height.value,
+    backgroundColor: color,
+  }));
+  return <Animated.View style={[wave.bar, style]} />;
+}
+
+const wave = StyleSheet.create({
+  bar: {
+    width: 5,
+    borderRadius: 3,
+    marginHorizontal: 2,
+    alignSelf: 'center',
+  },
+});
+
+// ─── Pulse ring ───────────────────────────────────────────────────────────────
+function PulseRing({ active }: { active: boolean }) {
+  const scale = useSharedValue(1);
+  const opacity = useSharedValue(0);
+  useEffect(() => {
+    if (active) {
+      scale.value = withRepeat(
+        withSequence(withTiming(1.7, { duration: 750 }), withTiming(1, { duration: 750 })),
+        -1,
+        false
+      );
+      opacity.value = withRepeat(
+        withSequence(withTiming(0.35, { duration: 375 }), withTiming(0, { duration: 375 })),
+        -1,
+        false
+      );
+    } else {
+      cancelAnimation(scale);
+      cancelAnimation(opacity);
+      scale.value = withSpring(1);
+      opacity.value = withTiming(0, { duration: 200 });
+    }
+  }, [active]);
+  const style = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
+  }));
+  return <Animated.View style={[pr.ring, style]} />;
+}
+
+const pr = StyleSheet.create({
+  ring: {
+    position: 'absolute',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.danger,
+  },
+});
+
+// ─── Main modal ───────────────────────────────────────────────────────────────
 export function AIModal({ visible, onClose, onResult }: Props) {
-  useAI(); // keep context subscription
+  useAI();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [partialText, setPartialText] = useState('');
+  const voiceAvailable = Voice !== null && Platform.OS !== 'web';
 
+  // ─── Voice setup ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!voiceAvailable) return;
+
+    Voice.onSpeechStart = () => {
+      setIsListening(true);
+      setVoiceError(null);
+    };
+
+    Voice.onSpeechEnd = () => {
+      setIsListening(false);
+    };
+
+    Voice.onSpeechError = (e: any) => {
+      setIsListening(false);
+      const msg: string = e?.error?.message ?? '';
+      // Ignore "no speech" errors silently
+      if (!msg.includes('7') && !msg.includes('no-speech')) {
+        setVoiceError('Parlez plus fort ou réessayez');
+      }
+    };
+
+    Voice.onSpeechPartialResults = (e: any) => {
+      const partial: string = e.value?.[0] ?? '';
+      setPartialText(partial);
+    };
+
+    Voice.onSpeechResults = (e: any) => {
+      const text: string = e.value?.[0] ?? '';
+      if (text) {
+        setInput(text);
+        setPartialText('');
+      }
+      setIsListening(false);
+    };
+
+    return () => {
+      if (Voice) {
+        Voice.destroy().then(Voice.removeAllListeners).catch(() => {});
+      }
+    };
+  }, [voiceAvailable]);
+
+  // Stop listening when modal closes
+  useEffect(() => {
+    if (!visible && isListening && voiceAvailable) {
+      Voice?.stop().catch(() => {});
+      setIsListening(false);
+    }
+  }, [visible]);
+
+  const startListening = useCallback(async () => {
+    if (!voiceAvailable) {
+      Alert.alert(
+        'Reconnaissance vocale',
+        'La reconnaissance vocale nest pas disponible sur cette plateforme. Utilisez la saisie texte.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    try {
+      setVoiceError(null);
+      setPartialText('');
+      setInput('');
+      await Voice.start('fr-FR');
+    } catch (e: any) {
+      setVoiceError('Impossible de démarrer le micro. Vérifiez les permissions.');
+      setIsListening(false);
+    }
+  }, [voiceAvailable]);
+
+  const stopListening = useCallback(async () => {
+    if (!voiceAvailable) return;
+    try {
+      await Voice.stop();
+    } catch {
+      setIsListening(false);
+    }
+  }, [voiceAvailable]);
+
+  const toggleMic = useCallback(() => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  }, [isListening, startListening, stopListening]);
+
+  // ─── Send ──────────────────────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
-    const text = input.trim();
+    const text = (input || partialText).trim();
     if (!text) return;
+    if (isListening) await stopListening();
     setLoading(true);
     try {
-      // parseWithClaude reads key from env internally; falls back to mock if absent
       const result = await parseWithClaude(text);
       onResult(result);
       setInput('');
+      setPartialText('');
       onClose();
     } catch {
       Alert.alert('Erreur IA', 'Impossible de traiter la demande. Veuillez réessayer.');
     } finally {
       setLoading(false);
     }
-  }, [input, onResult, onClose]);
+  }, [input, partialText, isListening, stopListening, onResult, onClose]);
+
+  const displayText = isListening ? partialText : input;
+  const canSend = (input.trim() || partialText.trim()) && !loading;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -72,7 +256,52 @@ export function AIModal({ visible, onClose, onResult }: Props) {
             </View>
           </View>
 
+          {/* Mic section */}
+          <View style={styles.micSection}>
+            {/* Pulse ring behind mic */}
+            <View style={styles.micRingWrapper}>
+              <PulseRing active={isListening} />
+              <PressableScale
+                onPress={toggleMic}
+                scaleTo={0.88}
+                style={[
+                  styles.micBtn,
+                  isListening && styles.micBtnActive,
+                ]}
+              >
+                <MaterialIcons
+                  name={isListening ? 'mic' : 'mic-none'}
+                  size={34}
+                  color="#fff"
+                />
+              </PressableScale>
+            </View>
 
+            {/* Waveform */}
+            {isListening ? (
+              <View style={styles.waveform}>
+                {[0, 60, 120, 80, 40, 100, 30, 70, 110, 50].map((d, i) => (
+                  <WaveBar key={i} delay={d} color={Colors.danger} />
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.micHint}>
+                {voiceAvailable
+                  ? isListening
+                    ? 'Parlez maintenant...'
+                    : 'Appuyez sur le micro pour dicter'
+                  : 'Saisie vocale non disponible sur web'}
+              </Text>
+            )}
+
+            {/* Voice error */}
+            {voiceError ? (
+              <View style={styles.errorRow}>
+                <MaterialIcons name="error-outline" size={15} color={Colors.danger} />
+                <Text style={styles.errorText}>{voiceError}</Text>
+              </View>
+            ) : null}
+          </View>
 
           {/* Examples */}
           <View style={styles.examples}>
@@ -92,23 +321,23 @@ export function AIModal({ visible, onClose, onResult }: Props) {
             </ScrollView>
           </View>
 
-          {/* Input */}
+          {/* Text input */}
           <View style={styles.inputRow}>
             <TextInput
-              style={styles.textInput}
-              placeholder="Décrivez votre tâche, routine ou projet..."
-              placeholderTextColor={Colors.textTertiary}
-              value={input}
-              onChangeText={setInput}
+              style={[styles.textInput, isListening && styles.textInputListening]}
+              placeholder={isListening ? 'Transcription en cours...' : 'Ou tapez votre demande...'}
+              placeholderTextColor={isListening ? Colors.danger + '80' : Colors.textTertiary}
+              value={displayText}
+              onChangeText={v => { if (!isListening) setInput(v); }}
               multiline
               maxLength={300}
-              autoFocus
+              editable={!isListening}
             />
             <PressableScale
               onPress={handleSend}
               scaleTo={0.88}
-              disabled={loading || !input.trim()}
-              style={[styles.sendBtn, (!input.trim() || loading) && styles.sendBtnDisabled]}
+              disabled={!canSend}
+              style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
             >
               {loading ? (
                 <ActivityIndicator color="#fff" size="small" />
@@ -119,7 +348,6 @@ export function AIModal({ visible, onClose, onResult }: Props) {
           </View>
 
           <Text style={styles.hint}>Propulsé par OnSpace AI</Text>
-
           <View style={{ height: Platform.OS === 'ios' ? 24 : 8 }} />
         </View>
       </KeyboardAvoidingView>
@@ -180,7 +408,59 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
   },
-
+  // ── Mic section
+  micSection: {
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+    gap: Spacing.md,
+    minHeight: 110,
+  },
+  micRingWrapper: {
+    width: 72,
+    height: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.textSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  micBtnActive: {
+    backgroundColor: Colors.danger,
+  },
+  waveform: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 48,
+    marginTop: 4,
+  },
+  micHint: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  errorText: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+  },
+  // ── Examples
   examples: {
     marginBottom: Spacing.lg,
     gap: Spacing.sm,
@@ -207,6 +487,7 @@ const styles = StyleSheet.create({
     color: Colors.primaryDark,
     fontWeight: FontWeight.medium,
   },
+  // ── Input row
   inputRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
@@ -224,6 +505,11 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     maxHeight: 120,
     lineHeight: 22,
+  },
+  textInputListening: {
+    borderColor: Colors.danger + '60',
+    backgroundColor: Colors.danger + '08',
+    color: Colors.danger,
   },
   sendBtn: {
     width: 50,
